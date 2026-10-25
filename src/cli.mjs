@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from './config.mjs';
 import { run } from './run.mjs';
 
-const help = `Игорь — поиск организаций, версия 0.1
+const help = `Игорь — поиск организаций, версия проекта 0.2
 
 Запуск в Windows 11: npm.cmd start
 Нужен Node.js 24.5+ (ветка 24 LTS). Установка npm-пакетов и API-ключи не нужны.

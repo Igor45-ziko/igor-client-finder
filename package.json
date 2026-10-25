@@ -1,13 +1,21 @@
 {
   "name": "igor-client-finder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Поиск автосервисов в открытых данных OSM без рассылок и платных API",
-  "engines": { "node": ">=24.5.0 <25" },
+  "engines": {
+    "node": ">=24.5.0 <25"
+  },
   "scripts": {
     "start": "node --use-env-proxy src/cli.mjs",
-    "test": "node --test test/model.test.mjs test/network.test.mjs test/run.test.mjs",
-    "check": "node --check src/cli.mjs && node --check src/network.mjs && node --check src/model.mjs && node --check src/run.mjs"
+    "audit": "node --use-env-proxy scripts/bootstrap-audit.mjs",
+    "setup:audit": "node --use-env-proxy scripts/bootstrap-audit.mjs --setup",
+    "test": "node scripts/check.mjs --test",
+    "check": "node scripts/check.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.64.1",
+    "robots-parser": "3.0.1"
   }
 }

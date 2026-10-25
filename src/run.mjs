@@ -5,7 +5,7 @@ import { ATTRIBUTION, CITIES, ENDPOINT, queryFor } from './config.mjs';
 import { makeClient, SearchError, writeJson } from './network.mjs';
 import { normalizeElement, deduplicate, selectLeads, toCsv, classify } from './model.mjs';
 
-async function acquireLock(cacheDir) {
+export async function acquireLock(cacheDir) {
   const path = join(cacheDir, 'run.lock');
   for (let attempt = 0; attempt < 2; attempt++) {
     try {

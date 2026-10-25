@@ -1,0 +1,27 @@
+name: Validate Windows and Linux
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium --only-shell
+      - run: npm run check
+      - run: npm test
+      - name: Check official Overture executable on this platform (no company queries)
+        run: node --input-type=module -e "import {ensureOverture} from './src/audit/overture.mjs'; import {spawnSync} from 'node:child_process'; const p=await ensureOverture(process.cwd()); const r=spawnSync(p,['--version'],{stdio:'inherit'}); process.exit(r.status ?? 1);"
