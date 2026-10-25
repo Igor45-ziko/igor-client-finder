@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CITIES, ATTRIBUTION } from '../config.mjs';
@@ -129,15 +130,29 @@ export async function runAudit({ root, input, limit = 60, target = 20, log = con
     const output = join(root, 'outputs', `audit-${started.replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`);
     const screenshots = join(output, 'screenshots'); const evidenceDir = join(output, 'evidence');
     await mkdir(screenshots, { recursive: true }); await mkdir(evidenceDir, { recursive: true });
+    const consoleLog = log; let logBytes = 0, logFailed = false;
+    log = message => {
+      consoleLog(message);
+      const line = `${new Date().toISOString()} ${message}\n`;
+      if (logFailed || logBytes > 1024 * 1024) return;
+      try { appendFileSync(join(output, 'diagnostics.log'), line, 'utf8'); logBytes += Buffer.byteLength(line); }
+      catch { logFailed = true; consoleLog('Не удалось записать diagnostics.log; диагностика остаётся в окне.'); }
+    };
+    log(`Проверка версии 0.2.1. Исходная выборка: ${path}\nЖурнал: ${join(output, 'diagnostics.log')}`);
     const report = { version: 2, sourceInput: path, startedAt: started, totalInput: rows.length, queued: queue.length,
       checked: 0, status: 'running', sources: [], errors: [], scope: 'Overture + OSM URLs + corporate email domains; not an exhaustive Internet search.' };
+    await writeJson(join(output, 'report.json'), report);
     const providers = new Map();
+    let downloadsDisabled = false;
     for (const city of CITIES.filter(c => queue.some(row => row.searchCities.includes(c.name)))) {
       if (signal?.aborted) break;
-      const data = await provider(city, { root, log, signal }); providers.set(city.name, data);
+      const data = downloadsDisabled ? { status: 'unavailable', message: 'Загрузка отключена: завершение предыдущего процесса не подтверждено.' } :
+        await provider(city, { root, log, signal }); providers.set(city.name, data);
+      if (data.cleanupFailed) downloadsDisabled = true;
       report.sources.push({ city: city.name, status: data.status, message: data.message, release: data.release,
         count: data.data?.features?.length, sourceUrl: data.sourceUrl, fetchedAt: data.fetchedAt, fromCache: data.fromCache });
       log(`${city.name}: Overture ${data.status}${data.message ? ' — ' + data.message : `, ${data.data.features.length} объектов`}.`);
+      await writeJson(join(output, 'report.json'), report);
     }
     let audit;
     const results = [];

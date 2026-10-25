@@ -19,8 +19,11 @@ export async function main(args = process.argv.slice(2)) {
   if (options.help) { console.log('npm.cmd run audit -- --limit 5\nПо умолчанию используется последняя непустая выборка outputs.\n--input "outputs/.../organizations.json" — выбрать другую.\n--limit 1..300 (по умолчанию 60), --target 1..20 (по умолчанию 20).'); return; }
   const { runAudit } = await import('./run.mjs');
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-  const controller = new AbortController(); const stop = () => { console.log('Остановка после сохранения текущих результатов…'); controller.abort(); };
-  process.once('SIGINT', stop); process.once('SIGTERM', stop);
+  const controller = new AbortController(); const stop = () => {
+    if (controller.signal.aborted) return;
+    console.log('Отмена: останавливаем загрузчик и сохраняем текущие результаты. Новые запросы не запускаются…'); controller.abort();
+  };
+  process.on('SIGINT', stop); process.on('SIGTERM', stop); process.on('SIGBREAK', stop);
   try { const result = await runAudit({ root, ...options, signal: controller.signal }); process.exitCode = controller.signal.aborted ? 130 : result.exitCode; }
-  finally { process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop); }
+  finally { process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop); process.removeListener('SIGBREAK', stop); }
 }

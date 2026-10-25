@@ -10,7 +10,7 @@ if errorlevel 1 (
 )
 echo Website audit. The first run may download free tools from the Internet.
 echo Existing outputs and cache will be preserved. No messages will be sent.
-call npm.cmd run audit -- %*
+node --use-env-proxy scripts/bootstrap-audit.mjs %*
 set result=%errorlevel%
 echo.
 pause

@@ -23,5 +23,8 @@ jobs:
       - run: npx playwright install --with-deps chromium --only-shell
       - run: npm run check
       - run: npm test
+      - name: Check Windows CMD launcher without a company query
+        if: runner.os == 'Windows'
+        run: cmd /d /c "start-audit.cmd --help < NUL"
       - name: Check official Overture executable on this platform (no company queries)
         run: node --input-type=module -e "import {ensureOverture} from './src/audit/overture.mjs'; import {spawnSync} from 'node:child_process'; const p=await ensureOverture(process.cwd()); const r=spawnSync(p,['--version'],{stdio:'inherit'}); process.exit(r.status ?? 1);"
