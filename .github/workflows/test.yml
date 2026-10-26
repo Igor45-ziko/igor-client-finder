@@ -1,7 +1,7 @@
 name: Validate Windows and Linux
 on:
   push:
-    branches: [main]
+    branches: [main, runtime-zip-024-check]
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,6 +23,16 @@ jobs:
       - run: npx playwright install --with-deps chromium --only-shell
       - run: npm run check
       - run: npm test
+      - name: Verify exact user ZIP contents against source allowlist
+        run: python scripts/package-user.py --check
+      - name: Scan user ZIP when Microsoft Defender is available
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/scan-user-archive.ps1
+      - name: Install and run the extracted user ZIP on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/check-user-archive.ps1
       - name: Check Windows CMD launcher without a company query
         if: runner.os == 'Windows'
         run: |
