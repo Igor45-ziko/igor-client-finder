@@ -2,9 +2,13 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export function auditArgs(args) {
-  const options = { limit: 60, target: 20 };
+  const options = { limit: 60, target: 20, overtureMode: 'cache' };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--input') { options.input = args[++i]; if (!options.input) throw new Error('--input требует путь к organizations.json.'); }
+    else if (args[i] === '--overture') {
+      options.overtureMode = args[++i];
+      if (!['cache', 'online', 'off'].includes(options.overtureMode)) throw new Error('--overture: cache, online или off.');
+    }
     else if (['--limit', '--target'].includes(args[i])) {
       const key = args[i].slice(2); const value = args[++i];
       if (!/^\d+$/.test(value || '') || Number(value) < 1 || Number(value) > (key === 'limit' ? 300 : 20)) throw new Error(`Недопустимое значение --${key}.`);
@@ -16,7 +20,7 @@ export function auditArgs(args) {
 }
 export async function main(args = process.argv.slice(2)) {
   const options = auditArgs(args);
-  if (options.help) { console.log('npm.cmd run audit -- --limit 5\nПо умолчанию используется последняя непустая выборка outputs.\n--input "outputs/.../organizations.json" — выбрать другую.\n--limit 1..300 (по умолчанию 60), --target 1..20 (по умолчанию 20).'); return; }
+  if (options.help) { console.log('npm.cmd run audit -- --limit 5\nПо умолчанию используется последняя непустая выборка outputs.\n--input "outputs/.../organizations.json" — выбрать другую.\n--limit 1..300 (по умолчанию 60), --target 1..20 (по умолчанию 20).\n--overture cache|online|off: по умолчанию только кэш, без ожидания загрузки. Онлайн: до 60 с на процесс, общий бюджет источников 90 с + остановка.'); return; }
   const { runAudit } = await import('./run.mjs');
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
   const controller = new AbortController(); const stop = () => {

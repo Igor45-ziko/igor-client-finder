@@ -16,7 +16,7 @@ export const STATUS = {
   unverified: 'Сайт-кандидат найден, принадлежность не подтверждена',
   unavailable: 'Сайт-кандидат найден, проверка недоступна',
   not_found: 'Сайт не обнаружен, требуется подтверждение',
-  incomplete: 'Поиск сайта не завершён: независимый источник недоступен',
+  incomplete: 'Поиск сайта не завершён: независимые сведения не получены',
   ambiguous: 'Несколько сайтов совпали; требуется ручная проверка',
 };
 
@@ -69,7 +69,7 @@ export function decide(discovery, checks) {
   if (discovery.unresolvedReferences?.length) return { code: 'unverified', priority: 0, best: null,
     reason: 'В источнике заполнено поле сайта, но адрес не удалось распознать. Нельзя считать это отсутствием сайта.' };
   if (discovery.independentStatus !== 'ok') return { code: 'incomplete', priority: 0, best: null,
-    reason: 'Отсутствие результата при недоступном Overture нельзя считать завершённым поиском.' };
+    reason: 'Независимый источник недоступен, отключён или не проверен. Это нельзя считать завершённым поиском.' };
   return { code: 'not_found', priority: 30, best: null,
     reason: 'В Overture и доступных полях контактов сайт не обнаружен. Это ограниченный поиск, не доказательство отсутствия сайта.' };
 }
@@ -80,7 +80,7 @@ export function resultNotes(r) {
       r.decision.best?.matched?.length ? ['Совпали: ' + r.decision.best.matched.join(', ')] : []).join(' | '),
     assumptions: r.decision.priority ? (r.decision.code === 'not_found' ? 'Возможно, полезна разработка сайта; наличие сайта, потребность и бюджет нужно подтвердить.' :
       'Возможно, полезно исправление выявленных проблем; интерес и бюджет не установлены.') : 'Автоматически обоснованного предложения услуги пока нет.',
-    errors: [r.discovery.independentStatus !== 'ok' && 'Независимый поиск недоступен или неполон',
+    errors: [r.decision.code !== 'confirmed' && r.discovery.independentStatus !== 'ok' && 'Независимый поиск недоступен, отключён или неполон',
       ...r.checks.map(c => c.reason || c.contactCheck), r.untestedCandidates > 0 && `Не проверено адресов: ${r.untestedCandidates}`].filter(Boolean).join(' | '),
   };
 }
@@ -118,7 +118,7 @@ export function htmlReport(report, results, shortlist) {
 }
 
 export async function runAudit({ root, input, limit = 60, target = 20, log = console.log, signal,
-  provider = loadOverture, browserFactory = launchBrowser, auditorFactory = createAuditor, clock = Date.now } = {}) {
+  overtureMode = 'cache', sourceBudgetMs = 90000, provider = loadOverture, browserFactory = launchBrowser, auditorFactory = createAuditor, clock = Date.now } = {}) {
   const path = await findInput(root, input);
   const rows = validateRows(JSON.parse(await readFile(path, 'utf8')));
   const queue = auditQueue(rows, limit);
@@ -138,37 +138,34 @@ export async function runAudit({ root, input, limit = 60, target = 20, log = con
       try { appendFileSync(join(output, 'diagnostics.log'), line, 'utf8'); logBytes += Buffer.byteLength(line); }
       catch { logFailed = true; consoleLog('Не удалось записать diagnostics.log; диагностика остаётся в окне.'); }
     };
-    log(`Проверка версии 0.2.1. Исходная выборка: ${path}\nЖурнал: ${join(output, 'diagnostics.log')}`);
+    log(`Проверка версии 0.2.2. Исходная выборка: ${path}\nЖурнал: ${join(output, 'diagnostics.log')}`);
     const report = { version: 2, sourceInput: path, startedAt: started, totalInput: rows.length, queued: queue.length,
       checked: 0, status: 'running', sources: [], errors: [], scope: 'Overture + OSM URLs + corporate email domains; not an exhaustive Internet search.' };
     await writeJson(join(output, 'report.json'), report);
     const providers = new Map();
-    let downloadsDisabled = false;
-    for (const city of CITIES.filter(c => queue.some(row => row.searchCities.includes(c.name)))) {
-      if (signal?.aborted) break;
-      const data = downloadsDisabled ? { status: 'unavailable', message: 'Загрузка отключена: завершение предыдущего процесса не подтверждено.' } :
-        await provider(city, { root, log, signal }); providers.set(city.name, data);
-      if (data.cleanupFailed) downloadsDisabled = true;
-      report.sources.push({ city: city.name, status: data.status, message: data.message, release: data.release,
-        count: data.data?.features?.length, sourceUrl: data.sourceUrl, fetchedAt: data.fetchedAt, fromCache: data.fromCache });
-      log(`${city.name}: Overture ${data.status}${data.message ? ' — ' + data.message : `, ${data.data.features.length} объектов`}.`);
+    const results = []; let audit;
+    const mergeSources = row => {
+      const entries = row.searchCities.map(c => providers.get(c)).filter(Boolean);
+      return { status: entries.length && entries.every(x => x.status === 'ok') ? 'ok' : 'unavailable',
+        data: { features: entries.flatMap(x => x.data?.features || []) },
+        sourceUrl: entries.find(x => x.sourceUrl)?.sourceUrl, release: entries.find(x => x.release)?.release,
+        fetchedAt: Math.min(...entries.filter(x => x.fetchedAt).map(x => x.fetchedAt)) };
+    };
+    const checkpoint = async () => {
+      report.checked = results.length;
+      await writeJson(join(output, 'audit.json'), results);
       await writeJson(join(output, 'report.json'), report);
-    }
-    let audit;
-    const results = [];
-    for (let index = 0; index < queue.length; index++) {
-      if (signal?.aborted) break;
-      const row = queue[index]; log(`[${index + 1}/${queue.length}] ${row.name}`);
-      const providerResults = row.searchCities.map(c => providers.get(c)).filter(Boolean);
-      const merged = { status: providerResults.length && providerResults.every(x => x.status === 'ok') ? 'ok' : 'unavailable',
-        data: { features: providerResults.flatMap(x => x.data?.features || []) },
-        sourceUrl: providerResults.find(x => x.sourceUrl)?.sourceUrl, release: providerResults.find(x => x.release)?.release,
-        fetchedAt: Math.min(...providerResults.filter(x => x.fetchedAt).map(x => x.fetchedAt)) };
-      const discovery = discover(row, merged);
-      const checks = [];
-      // Bounded budget is explicit in the result; remaining addresses are not described as checked.
-      for (const candidate of discovery.candidates.slice(0, 3)) {
-        if (signal?.aborted) break;
+      const selected = results.filter(r => r.decision.priority > 0).sort((a, b) => b.decision.priority - a.decision.priority).slice(0, target);
+      await writeFile(join(output, 'audit.csv'), auditCsv(results), 'utf8');
+      await writeFile(join(output, 'shortlist.csv'), auditCsv(selected), 'utf8');
+      await writeFile(join(output, 'report.html'), htmlReport(report, results, selected), 'utf8');
+    };
+    const checkRow = async (row, index, previous) => {
+      const discovery = discover(row, mergeSources(row));
+      const checks = previous?.checks || [];
+      for (const candidate of discovery.candidates) {
+        if (signal?.aborted || checks.length >= 3) break;
+        if (checks.some(c => c.candidate.url === candidate.url)) continue;
         if (!browser) {
           try { browser = await browserFactory(); audit = auditorFactory({ browser }); }
           catch { report.errors.push('Браузер не запущен; выполните npm.cmd run setup:audit.'); break; }
@@ -176,19 +173,54 @@ export async function runAudit({ root, input, limit = 60, target = 20, log = con
         checks.push(await audit(row, candidate, { outputDir: screenshots, slug: `org-${index + 1}-site-${checks.length + 1}`, signal }));
       }
       const result = { row, discovery, checks, decision: decide(discovery, checks), checkedAt: new Date(clock()).toISOString(),
-        untestedCandidates: Math.max(0, discovery.candidates.length - checks.length), evidenceFile: `evidence/org-${index + 1}.json` };
-      result.contacts = availableContacts(row, checks);
-      result.notes = resultNotes(result);
-      results.push(result); report.checked = results.length;
+        untestedCandidates: discovery.candidates.filter(c => !checks.some(x => x.candidate.url === c.url)).length,
+        evidenceFile: `evidence/org-${index + 1}.json` };
+      result.contacts = availableContacts(row, checks); result.notes = resultNotes(result);
       await writeJson(join(evidenceDir, `org-${index + 1}.json`), result);
-      // Checkpoint after every organization: a later interruption cannot erase prior evidence.
-      await writeJson(join(output, 'audit.json'), results);
-      await writeJson(join(output, 'report.json'), report);
-      log(`  ${STATUS[result.decision.code]}`);
+      return result;
+    };
+    log('Сначала проверяем уже известные сайты и корпоративные email-домены, без ожидания каталогов.');
+    for (const [index, row] of queue.entries()) {
+      if (signal?.aborted) break;
+      log(`[${index + 1}/${queue.length}] ${row.name}`);
+      results.push(await checkRow(row, index)); await checkpoint();
+      log(`  ${STATUS[results.at(-1).decision.code]}`);
     }
+    // Supplement only unresolved records. A source outage must never gate a known website.
+    const needed = CITIES.filter(c => results.some(r => r.decision.code !== 'confirmed' && r.row.searchCities.includes(c.name)));
+    const sourceController = new AbortController();
+    const sourceSignal = signal ? AbortSignal.any([signal, sourceController.signal]) : sourceController.signal;
+    const sourceTimer = setTimeout(() => sourceController.abort(new Error('Общий бюджет дополнительных источников 90 секунд исчерпан.')), sourceBudgetMs);
+    let downloadsDisabled = false;
+    try {
+      for (const city of needed) {
+        if (signal?.aborted) break;
+        let data;
+        if (overtureMode === 'off') data = { status: 'skipped', message: 'Overture отключён. Независимый поиск не выполнен.' };
+        else if (sourceSignal.aborted || downloadsDisabled) data = { status: 'unavailable', message: 'Дополнительная загрузка остановлена: исчерпан бюджет или завершение предыдущего процесса не подтверждено.' };
+        else {
+          try { data = await provider(city, { root, log, signal: sourceSignal, mode: overtureMode, downloadTimeoutMs: 60000 }); }
+          catch (error) { data = { status: 'unavailable', message: `Ошибка дополнительного источника: ${error.message}` }; }
+        }
+        providers.set(city.name, data);
+        if (data.cleanupFailed) downloadsDisabled = true;
+        report.sources.push({ city: city.name, status: data.status, message: data.message, release: data.release,
+          count: data.data?.features?.length, sourceUrl: data.sourceUrl, fetchedAt: data.fetchedAt, fromCache: data.fromCache });
+        log(`${city.name}: Overture ${data.status}${data.message ? ' — ' + data.message : `, ${data.data.features.length} объектов`}.`);
+        await checkpoint();
+      }
+    } finally { clearTimeout(sourceTimer); }
+    for (let index = 0; index < results.length; index++) {
+      if (signal?.aborted) break;
+      if (results[index].decision.code === 'confirmed') continue;
+      results[index] = await checkRow(results[index].row, index, results[index]);
+      await checkpoint();
+    }
+    if (!needed.length) report.sources.push({ city: 'Все выбранные зоны', status: 'not_needed', message: 'Сайты уже подтверждены по содержимому; Overture не требовался.' });
     const shortlist = results.filter(r => r.decision.priority > 0).sort((a, b) => b.decision.priority - a.decision.priority).slice(0, target);
-    report.status = signal?.aborted ? 'interrupted' : report.sources.some(x => x.status !== 'ok') || report.errors.length ||
-      results.some(r => ['incomplete', 'unavailable'].includes(r.decision.code) || r.untestedCandidates) ? 'partial' : 'complete';
+    report.status = signal?.aborted ? 'interrupted' : report.errors.length ||
+      results.some(r => ['incomplete', 'unavailable'].includes(r.decision.code) || r.untestedCandidates ||
+        (r.decision.code !== 'confirmed' && r.discovery.independentStatus !== 'ok')) ? 'partial' : 'complete';
     report.finishedAt = new Date(clock()).toISOString(); report.shortlisted = shortlist.length; report.notProcessed = rows.length - results.length;
     report.confirmedSites = results.filter(r => r.decision.code === 'confirmed').length;
     report.needsReview = results.filter(r => !['confirmed', 'not_found'].includes(r.decision.code)).length;

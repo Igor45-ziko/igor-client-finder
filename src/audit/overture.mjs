@@ -123,7 +123,8 @@ export function runDownload(executable, args, { signal, log = () => {}, output,
         if (bytes > maxBytes) stop(`Выгрузка превысила ${(maxBytes / 1048576).toFixed(2)} МБ.`);
       } finally { monitoring = false; }
     }, Math.min(1000, heartbeatMs));
-    const abort = () => stop('Выгрузка остановлена пользователем (Ctrl+C).');
+    const abort = () => stop(signal?.reason?.name === 'AbortError' ? 'Выгрузка остановлена пользователем (Ctrl+C).' :
+      'Выгрузка остановлена по общему ограничению времени дополнительного источника.');
     signal?.addEventListener('abort', abort, { once: true });
     const consume = chunk => {
       if (settled || stopped) return;
@@ -148,7 +149,7 @@ export function runDownload(executable, args, { signal, log = () => {}, output,
 const combinedSignal = (signal, ms) => signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
 
 export async function loadOverture(city, { root, fetchImpl = fetch, clock = Date.now, log = console.log, signal,
-  download = runDownload, installer = ensureOverture, env = process.env } = {}) {
+  download = runDownload, installer = ensureOverture, env = process.env, mode = 'online', downloadTimeoutMs = 60000 } = {}) {
   if (signal?.aborted) return { status: 'unavailable', message: 'Отменено пользователем.', features: [] };
   const bbox = bboxFor(city);
   const dir = join(root, '.cache', 'overture'); await mkdir(dir, { recursive: true });
@@ -160,6 +161,7 @@ export async function loadOverture(city, { root, fetchImpl = fetch, clock = Date
       return { ...cache, status: 'ok', fromCache: true };
     } catch { /* ignore damaged cache */ }
   }
+  if (mode !== 'online') return { status: 'skipped', message: 'Свежего кэша Overture нет. Сетевая выгрузка по умолчанию отключена; независимый поиск не выполнен.', features: [] };
   // PyArrow S3 in the official executable does not expose proxy_options. Never unset
   // proxy variables or launch a potentially direct S3 path in a managed proxy environment.
   if (['HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'https_proxy', 'http_proxy', 'all_proxy'].some(k => env[k]))
@@ -178,14 +180,14 @@ export async function loadOverture(city, { root, fetchImpl = fetch, clock = Date
     temp = join(dir, `${key}-${randomUUID()}.geojson`);
     log(`${city.name}: независимый поиск в Overture ${release}…`);
     await download(executable, ['download', `--bbox=${bbox.join(',')}`, '--type=place', '--release', release,
-      '-f', 'geojson', '--stac', '--connect_timeout', '15', '--request_timeout', '30', '-o', temp], { signal, log, output: temp });
+      '-f', 'geojson', '--stac', '--connect_timeout', '15', '--request_timeout', '30', '-o', temp], { signal, log, output: temp, timeoutMs: downloadTimeoutMs });
     signal?.throwIfAborted();
     const info = await stat(temp); if (info.size > 100 * 1024 * 1024) throw new Error('Выгрузка слишком велика.');
     const data = validatePlaces(JSON.parse(await readFile(temp, 'utf8')));
     const result = { fetchedAt: clock(), release, bbox, data, sourceUrl: `https://stac.overturemaps.org/${release}/catalog.json`, attribution: OVERTURE_ATTRIBUTION };
     await writeJson(path, result); return { ...result, status: 'ok', fromCache: false };
   } catch (error) {
-    return { status: 'unavailable', cleanupFailed: !!error.cleanupFailed, message: error.cleanupFailed ? error.message : signal?.aborted ? 'Отменено пользователем.' : error instanceof SyntaxError ? 'Некорректный ответ Overture.' :
+    return { status: 'unavailable', cleanupFailed: !!error.cleanupFailed, message: error.cleanupFailed ? error.message : signal?.aborted ? 'Дополнительная загрузка отменена пользователем или по общему лимиту времени.' : error instanceof SyntaxError ? 'Некорректный ответ Overture.' :
       (/fetch failed|network|TLS|certificate/i.test(error.message) ? 'Сетевой доступ к Overture не подтверждён.' : error.message), features: [] };
   } finally { if (temp) await unlink(temp).catch(() => {}); }
 }

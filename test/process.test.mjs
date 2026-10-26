@@ -110,7 +110,7 @@ test('Ctrl+C cancels STAC before an installer or data download can run', async t
       const pending = new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
       controller.abort(); return pending;
     } });
-  assert.equal(result.status, 'unavailable'); assert.match(result.message, /Отменено/);
+  assert.equal(result.status, 'unavailable'); assert.match(result.message, /отменена/);
 });
 test('cancelled tool download removes only its own temporary file', async t => {
   const root = await temporary(t); const controller = new AbortController();
@@ -152,7 +152,7 @@ test('abort during independent lookup exports interrupted report and never start
   const controller = new AbortController(); let calls = 0;
   const result = await runAudit({ root, signal: controller.signal, log: () => {}, browserFactory: () => assert.fail('browser started'),
     provider: async () => { calls++; controller.abort(); return { status: 'unavailable', message: 'cancelled' }; } });
-  assert.equal(calls, 1); assert.equal(result.report.status, 'interrupted'); assert.equal(result.report.checked, 0);
+  assert.equal(calls, 1); assert.equal(result.report.status, 'interrupted'); assert.equal(result.report.checked, 2); // Baseline records were checkpointed before optional lookup.
   assert.match(await readFile(join(result.output, 'report.html'), 'utf8'), /interrupted/);
   assert.equal(await stat(join(root, '.cache', 'run.lock')).catch(() => null), null);
 });

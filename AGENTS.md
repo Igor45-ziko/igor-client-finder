@@ -12,3 +12,5 @@
 - Inspect the fresh report status and exit code. A failed search with empty CSV is not a successful zero-result search. Preserve earlier exports.
 - Publishing to a new remote is separate from running this local module; do not use existing portfolio remotes as a transfer channel.
 - Stage 2 command: npm.cmd run audit -- --limit 5. It automatically selects the latest nonempty saved organizations.json, and installs free browser dependencies when needed. Retain the user's outputs and .cache when upgrading. Tests require a browser; use PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium here or npm run setup:audit. Never mark a blocked independent search as a successful no-site finding.
+
+- Version 0.2.2: default audit reads Overture cache only; online is explicit --overture online and runs after known websites. Never reintroduce source-dependent gating. Diagnose source access with diagnose-sources.cmd (45 seconds total), not a bulk download. Wikidata and AllThePlaces have NOT been validated as working discovery sources here; do not claim otherwise.

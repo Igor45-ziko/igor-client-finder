@@ -78,9 +78,10 @@ export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, p
   }
   return async function audit(row, candidate, { outputDir, slug, signal } = {}) {
     const result = { candidate, status: 'unverified', checkedAt: new Date(clock()).toISOString(), pages: [], issues: [], screenshots: [], matched: [], blockedRequests: 0 };
-    let context; let routeReason = '';
+    let context; let routeReason = ''; let stage = 'address';
     try {
       const initial = await guard(candidate.url);
+      stage = 'robots';
       const rule = await policy(initial.href);
       if (!rule.allowed || rule.robots.isAllowed(initial.href, 'IgorClientFinder') === false)
         return { ...result, status: 'access_limited', reason: rule.reason || 'robots.txt запрещает проверку.' };
@@ -129,6 +130,7 @@ export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, p
           throw new Error('ACCESS_LIMITED');
         return { text, status };
       }
+      stage = 'homepage';
       const home = await visit(initial.href); const homeUrl = page.url();
       if (isDirectory(homeUrl)) return { ...result, finalUrl: homeUrl, status: 'unverified', reason: 'Адрес перенаправляет в соцсеть или каталог; самостоятельный сайт не подтверждён.' };
       const contact = await page.locator('a[href]').evaluateAll(links => links.map(a => ({ url: a.href, text: a.textContent || '' }))
@@ -143,10 +145,12 @@ export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, p
       const evidence = siteEvidence(row, combined);
       result.evidence = evidence; result.matched = evidence.matched;
       result.status = evidence.confirmed ? 'confirmed' : 'unverified';
+      if (!evidence.confirmed) result.reason = `Принадлежность сайта не подтверждена. Совпали: ${evidence.matched.join(', ') || 'нет достаточных данных'}. Нужны дополнительные совпадения названия, контакта или адреса.`;
       result.finalUrl = homeUrl;
       if (evidence.confirmed && home.status === 404) result.issues.push({ code: 'home_404', label: 'Проверенный адрес вернул HTTP 404', url: homeUrl, weight: 4 });
       // Reload the home page only when visiting contacts changed it.
       if (page.url() !== homeUrl) await visit(homeUrl);
+      stage = 'screenshots-and-mobile';
       await page.screenshot({ path: join(outputDir, `${slug}-desktop.png`), fullPage: false, timeout: 10000 });
       result.screenshots.push(`${slug}-desktop.png`);
       await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(500);
@@ -163,8 +167,10 @@ export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, p
       result.screenshots.push(`${slug}-mobile.png`);
       return result;
     } catch (error) {
+      const errorCode = (error.message + ' ' + routeReason).match(/UNSAFE_URL|UNSAFE_HOST|NON_PUBLIC_ADDRESS|ENOTFOUND|EAI_AGAIN|ERR_[A-Z_]+|ACCESS_LIMITED|ROBOTS_DENIED|SERVER_LIMIT/)?.[0] ||
+        (/timeout|timed out/i.test(error.message) ? 'TIMEOUT' : 'BROWSER_OR_NETWORK');
       return { ...result, status: /ACCESS_LIMITED|ROBOTS|SERVER_LIMIT/.test(error.message + routeReason) ? 'access_limited' : 'unavailable',
-        reason: 'Проверка ограничена или страница не загрузилась. Это не доказывает, что сайт неисправен у клиентов.', errorCode: error.message?.includes('UNSAFE') ? 'UNSAFE_URL' : 'BROWSER_OR_NETWORK' };
+        reason: `Проверка ограничена или страница не загрузилась (этап: ${stage}, код: ${errorCode}). Это не доказывает, что сайт неисправен у клиентов.`, errorCode, failureStage: stage };
     } finally { await context?.close(); }
   };
 }
