@@ -138,7 +138,7 @@ export async function runAudit({ root, input, limit = 60, target = 20, log = con
       try { appendFileSync(join(output, 'diagnostics.log'), line, 'utf8'); logBytes += Buffer.byteLength(line); }
       catch { logFailed = true; consoleLog('Не удалось записать diagnostics.log; диагностика остаётся в окне.'); }
     };
-    log(`Проверка версии 0.2.2. Исходная выборка: ${path}\nЖурнал: ${join(output, 'diagnostics.log')}`);
+    log(`Проверка версии 0.2.3. Исходная выборка: ${path}\nЖурнал: ${join(output, 'diagnostics.log')}`);
     const report = { version: 2, sourceInput: path, startedAt: started, totalInput: rows.length, queued: queue.length,
       checked: 0, status: 'running', sources: [], errors: [], scope: 'Overture + OSM URLs + corporate email domains; not an exhaustive Internet search.' };
     await writeJson(join(output, 'report.json'), report);

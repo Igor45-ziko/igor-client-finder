@@ -1,6 +1,6 @@
 {
   "name": "igor-client-finder",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "description": "Поиск автосервисов в открытых данных OSM без рассылок и платных API",

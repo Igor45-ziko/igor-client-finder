@@ -4,6 +4,40 @@ export const ATP_MANIFEST = 'https://alltheplaces-data.openaddresses.io/runs/lat
 export const WIKIDATA_RECORD = 'https://www.wikidata.org/wiki/Special:EntityData/Q129632037.json';
 const STAC = 'https://stac.overturemaps.org/catalog.json';
 
+// Both producers exist upstream: ci/run_all_spiders.sh (flat) and
+// ci/build_latest_json.py (grouped). A manifest is metadata, not downloaded POIs.
+export function validateAtpManifest(manifest) {
+  const errors = [];
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest))
+    return { valid: false, format: null, errors: ['Ожидается JSON-объект манифеста.'] };
+  const count = value => Number.isSafeInteger(value) && value >= 0;
+  const httpsUrl = value => {
+    if (typeof value !== 'string' || !value.trim()) return false;
+    try { const url = new URL(value); return url.protocol === 'https:' && !!url.hostname && !url.username && !url.password; }
+    catch { return false; }
+  };
+  for (const key of ['spiders', 'total_lines']) if (!count(manifest[key])) errors.push(`${key}: требуется целое неотрицательное число.`);
+  for (const key of ['stats_url', 'insights_url', 'pmtiles_url'])
+    if (key in manifest && !httpsUrl(manifest[key])) errors.push(`${key}: ожидается абсолютный HTTPS URL без учётных данных.`);
+  let format = null;
+  if ('output_url' in manifest || 'parquet_url' in manifest) {
+    format = 'flat';
+    for (const key of ['output_url', 'parquet_url'])
+      if (key in manifest && !httpsUrl(manifest[key])) errors.push(`${key}: ожидается абсолютный HTTPS URL без учётных данных.`);
+  } else if (Array.isArray(manifest.groups)) {
+    format = 'grouped';
+    if (!manifest.groups.length && (manifest.spiders !== 0 || manifest.total_lines !== 0)) errors.push('Пустой groups при ненулевых счётчиках.');
+    for (const [index, group] of manifest.groups.entries()) {
+      if (!group || typeof group !== 'object' || Array.isArray(group) || typeof group.name !== 'string' || !group.name.trim()) {
+        errors.push(`groups[${index}]: требуется объект с названием группы.`); continue;
+      }
+      if (!('zip_url' in group) && !('parquet_url' in group)) errors.push(`groups[${index}]: отсутствует ссылка на данные.`);
+      for (const key of ['zip_url', 'parquet_url']) if (key in group && !httpsUrl(group[key])) errors.push(`groups[${index}].${key}: некорректный HTTPS URL.`);
+    }
+  } else errors.push('Не найден плоский или групповой формат публикации.');
+  return { valid: errors.length === 0, format, errors };
+}
+
 // Small read-only probes, no native downloader, no redirects to unreviewed hosts,
 // no alternate mirrors, no company/contact submissions and no proxy manipulation.
 export async function probe(url, { fetchImpl = fetch, signal, timeoutMs = 8000, limit = 262144, prefixOnly = false } = {}) {
@@ -13,7 +47,7 @@ export async function probe(url, { fetchImpl = fetch, signal, timeoutMs = 8000, 
   try {
     requestSignal.throwIfAborted();
     response = await fetchImpl(url, { redirect: 'manual', signal: requestSignal,
-      headers: { 'User-Agent': 'IgorClientFinder/0.2.2 (read-only source diagnostics)', ...(prefixOnly ? { Range: `bytes=0-${limit - 1}` } : {}) } });
+      headers: { 'User-Agent': 'IgorClientFinder/0.2.3 (read-only source diagnostics)', ...(prefixOnly ? { Range: `bytes=0-${limit - 1}` } : {}) } });
     const base = { url, http: response.status, elapsedMs: Math.round(performance.now() - started),
       contentLength: response.headers.get('content-length'), contentType: response.headers.get('content-type'),
       retryAfter: response.headers.get('retry-after') };
@@ -43,7 +77,7 @@ const publicResult = ({ body, ...rest }) => rest;
 export async function diagnoseSources({ fetchImpl = fetch, signal, timeoutMs = 8000, totalMs = 45000, log = console.log } = {}) {
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), totalMs);
   const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-  const report = { version: '0.2.2', startedAt: new Date().toISOString(), checks: [],
+  const report = { version: '0.2.3', startedAt: new Date().toISOString(), checks: [],
     scope: 'Small connectivity probes only; not a successful website search or proof of source coverage.' };
   const check = async (name, url, options = {}) => {
     log(`${name}: проверка до ${timeoutMs / 1000} с…`);
@@ -77,8 +111,13 @@ export async function diagnoseSources({ fetchImpl = fetch, signal, timeoutMs = 8
       if (atp.status === 'reachable') {
         try {
           const manifest = JSON.parse(atp.body);
-          report.checks.at(-1).manifestKeys = Object.keys(manifest).slice(0, 15);
-          report.checks.at(-1).manifestValid = Number.isInteger(manifest.spiders) && Array.isArray(manifest.groups);
+          const validation = validateAtpManifest(manifest);
+          report.checks.at(-1).manifestKeys = manifest && typeof manifest === 'object' ? Object.keys(manifest).slice(0, 15) : [];
+          report.checks.at(-1).manifestValid = validation.valid;
+          report.checks.at(-1).manifestFormat = validation.format;
+          report.checks.at(-1).manifestErrors = validation.errors;
+          log(validation.valid ? `  AllThePlaces: формат ${validation.format}, структура корректна.` :
+            `  AllThePlaces: ошибка формата — ${validation.errors.join(' ')}`);
           report.checks.at(-1).note = 'Получение описания публикации не подтверждает наличие компаний или сайтов в данных.';
         } catch { report.checks.at(-1).parseError = 'Ответ не является ожидаемым JSON.'; }
       }

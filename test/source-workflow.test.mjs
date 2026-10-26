@@ -7,8 +7,12 @@ import { CITIES } from '../src/config.mjs';
 import { loadOverture } from '../src/audit/overture.mjs';
 import { runAudit } from '../src/audit/run.mjs';
 import { auditArgs } from '../src/audit/cli.mjs';
-import { probe, diagnoseSources, WIKIDATA_RECORD, ATP_MANIFEST } from '../src/audit/diagnostics.mjs';
+import { probe, diagnoseSources, WIKIDATA_RECORD, ATP_MANIFEST, validateAtpManifest } from '../src/audit/diagnostics.mjs';
 import { temporary, element, timestamp, response } from './helpers.mjs';
+
+// Structure follows upstream ci/run_all_spiders.sh and the user's real field list.
+// Values/URLs are synthetic; this is NOT a captured live response or business data.
+const flatManifest = JSON.parse(await readFile(new URL('./fixtures/alltheplaces-flat.json', import.meta.url), 'utf8'));
 
 const makeRow = (id = 1, city = CITIES[0], site = true) => normalizeElement(element(id,
   { name: 'Синтетический автосервис для теста', ...(site ? { website: `https://synthetic-${id}.example.org/` } : {}) }, { lat: city.lat, lon: city.lon }), city, timestamp);
@@ -129,10 +133,13 @@ test('diagnostics preserve public evidence but do not save a raw response or inv
     if (url.endsWith('/collections.parquet')) return new Response('PAR1synthetic');
     if (url.includes('s3.us-west-2')) return new Response('<ListBucketResult><Key>synthetic.parquet</Key></ListBucketResult>');
     if (url === WIKIDATA_RECORD) return response({ entities: { Q129632037: { id: 'Q129632037', claims: { P856: [{ mainsnak: { datavalue: { value: 'https://synthetic.example.org' } } }] } } } });
-    if (url === ATP_MANIFEST) return response({ spiders: 1, groups: [] });
+    if (url === ATP_MANIFEST) return response(flatManifest);
     assert.fail(url);
   } });
   assert.equal(report.status, 'complete'); assert.equal(report.checks.length, 5);
+  const manifestCheck = report.checks.find(x => x.url === ATP_MANIFEST);
+  assert.equal(manifestCheck.manifestValid, true); assert.equal(manifestCheck.manifestFormat, 'flat');
+  assert.deepEqual(manifestCheck.manifestErrors, []);
   assert.ok(report.checks.every(x => !('body' in x)));
   assert.deepEqual(report.checks.find(x => x.url === WIKIDATA_RECORD).publishedWebsites, ['https://synthetic.example.org']);
 });
@@ -152,4 +159,38 @@ test('unconfirmed candidate with disabled source remains partial, not fully veri
     auditorFactory: () => async (row, candidate) => ({ candidate, status: 'unverified', matched: [], issues: [] }) });
   assert.equal(result.report.status, 'partial'); assert.equal(result.shortlist.length, 0);
   assert.equal(result.results[0].decision.code, 'unverified');
+});
+
+test('AllThePlaces real flat field structure is valid without groups; extra fields are allowed', () => {
+  assert.equal('groups' in flatManifest, false);
+  assert.deepEqual(validateAtpManifest({ ...flatManifest, future_field: { arbitrary: true } }), { valid: true, format: 'flat', errors: [] });
+});
+test('AllThePlaces grouped producer remains supported with counters and real artifact fields', () => {
+  const manifest = { spiders: 2, total_lines: 10, stats_url: 'https://data.example.org/stats.json', groups: [
+    { name: 'brands', spider_count: 2, feature_count: 10, zip_url: 'https://data.example.org/brands.zip', parquet_url: 'https://data.example.org/brands.parquet' },
+  ] };
+  assert.deepEqual(validateAtpManifest(manifest), { valid: true, format: 'grouped', errors: [] });
+  assert.equal(validateAtpManifest({ spiders: 0, total_lines: 0, groups: [] }).valid, true);
+  assert.equal(validateAtpManifest({ ...manifest, groups: [] }).valid, false);
+});
+test('AllThePlaces rejects invalid structures, counters and unsafe artifact URLs with specific reasons', () => {
+  for (const value of [null, [], 'text', {}, { spiders: 2, total_lines: 10 },
+    { ...flatManifest, spiders: -1 }, { ...flatManifest, total_lines: '10' }, { ...flatManifest, total_lines: 1.5 },
+    { ...flatManifest, spiders: Number.MAX_SAFE_INTEGER + 1 }, { ...flatManifest, output_url: '' },
+    { ...flatManifest, parquet_url: 'javascript:alert(1)' }, { ...flatManifest, stats_url: '/relative.json' },
+    { ...flatManifest, output_url: 'https://user:password@example.org/file.zip' },
+    { spiders: 1, total_lines: 1, groups: [null] }, { spiders: 1, total_lines: 1, groups: [{ name: 'brands' }] },
+    { spiders: 1, total_lines: 1, groups: [{ name: 'brands', zip_url: 'invalid' }] }]) {
+    const result = validateAtpManifest(value); assert.equal(result.valid, false, JSON.stringify(value)); assert.ok(result.errors.length);
+  }
+});
+test('flat AllThePlaces format failure is reported as schema failure rather than network or JSON failure', async () => {
+  const report = await diagnoseSources({ log: () => {}, fetchImpl: async url => {
+    if (url === ATP_MANIFEST) return response({ ...flatManifest, total_lines: -1 });
+    return new Response('', { status: 403 });
+  } });
+  const item = report.checks.find(x => x.url === ATP_MANIFEST);
+  assert.equal(item.status, 'reachable'); assert.equal(item.http, 200); assert.equal(item.manifestValid, false);
+  assert.match(item.manifestErrors.join(' '), /total_lines/); assert.equal(item.parseError, undefined);
+  assert.equal(report.status, 'partial');
 });

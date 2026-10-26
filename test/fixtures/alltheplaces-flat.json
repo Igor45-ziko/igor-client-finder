@@ -1,0 +1,13 @@
+{
+  "run_id": "synthetic-schema-fixture-only",
+  "output_url": "https://data.example.org/runs/fixture/output.zip",
+  "pmtiles_url": "https://data.example.org/runs/fixture/output.pmtiles",
+  "parquet_url": "https://data.example.org/runs/fixture/output.parquet",
+  "stats_url": "https://data.example.org/runs/fixture/stats/_results.json",
+  "insights_url": "https://data.example.org/runs/fixture/stats/_insights.json",
+  "start_time": "2026-10-26T00:00:00Z",
+  "end_time": "2026-10-26T00:01:00Z",
+  "size_bytes": 1024,
+  "spiders": 2,
+  "total_lines": 10
+}
