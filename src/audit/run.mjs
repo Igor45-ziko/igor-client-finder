@@ -12,6 +12,8 @@ import { launchBrowser, createAuditor } from './browser.mjs';
 import { CHANNELS, CHANNEL_LABELS, availableContacts, contactFields } from './contacts.mjs';
 
 export const STATUS = {
+  pending: 'Проверка сайта ещё не выполнена',
+  not_confirmed: 'Сайт не подтверждён; независимый поиск в этом режиме не выполнялся',
   confirmed: 'Официальный сайт подтверждён совпадением данных',
   unverified: 'Сайт-кандидат найден, принадлежность не подтверждена',
   unavailable: 'Сайт-кандидат найден, проверка недоступна',
@@ -80,25 +82,28 @@ export function resultNotes(r) {
       r.decision.best?.matched?.length ? ['Совпали: ' + r.decision.best.matched.join(', ')] : []).join(' | '),
     assumptions: r.decision.priority ? (r.decision.code === 'not_found' ? 'Возможно, полезна разработка сайта; наличие сайта, потребность и бюджет нужно подтвердить.' :
       'Возможно, полезно исправление выявленных проблем; интерес и бюджет не установлены.') : 'Автоматически обоснованного предложения услуги пока нет.',
-    errors: [r.decision.code !== 'confirmed' && r.discovery.independentStatus !== 'ok' && 'Независимый поиск недоступен, отключён или неполон',
+    errors: [r.row.geoWarning, r.decision.code !== 'confirmed' && r.discovery.independentStatus !== 'ok' &&
+      (r.discovery.independentStatus === 'not_requested' ? 'Независимый поиск не выполнялся в режиме сохранённой базы.' : 'Независимый поиск недоступен, отключён или неполон'),
       ...r.checks.map(c => c.reason || c.contactCheck), r.untestedCandidates > 0 && `Не проверено адресов: ${r.untestedCandidates}`].filter(Boolean).join(' | '),
   };
 }
 export function auditCsv(results) {
-  const header = ['Название', 'Зона поиска', ...CHANNELS.map(k => CHANNEL_LABELS[k]), 'Статус сайта', 'Сайт / кандидаты', 'Основания совпадения',
-    'Проблемы и причина отбора', 'Подтверждённые наблюдения', 'Предположения', 'Ошибки и ограничения', 'Приоритет проверки', 'Независимый источник', 'Ссылки источника сайтов', 'Источники OSM', 'Доказательства', 'Дата проверки UTC'];
+  const header = ['Название', 'Зона поиска', 'Город в источнике', 'Адрес', ...CHANNELS.map(k => CHANNEL_LABELS[k]), 'Статус сайта', 'Сайт / кандидаты', 'Основания совпадения',
+    'Проблемы и причина отбора', 'Подтверждённые наблюдения', 'Предположения', 'Ошибки и ограничения', 'Приоритет проверки', 'Независимый источник', 'Ссылки источника сайтов', 'Источники OSM', 'Даты исходных сведений UTC', 'Доказательства', 'Дата проверки UTC'];
   return '\uFEFF' + [header, ...results.map(r => { const fields = contactFields(r.row, r.checks); const notes = resultNotes(r); return [r.row.name, r.row.searchCities.join(' | '),
-    ...CHANNELS.map(k => fields[k]), STATUS[r.decision.code],
+    r.row.cityInSource || '', r.row.address || '', ...CHANNELS.map(k => fields[k]), STATUS[r.decision.code],
     r.decision.best?.finalUrl || r.discovery.candidates.map(x => x.url).join(' | '), r.decision.best?.matched?.join(', ') || '',
     r.decision.reason, notes.facts, notes.assumptions, notes.errors, r.decision.priority, r.discovery.matches.map(x => `Overture ${x.id}`).join(' | ') || r.discovery.independentStatus,
     [...new Set([r.discovery.sourceUrl, ...r.discovery.candidates.flatMap(c => c.sources.map(s => s.sourceUrl))].filter(Boolean))].join(' | '),
-    r.row.sources.join(' | '), r.evidenceFile, r.checkedAt]; })].map(row => row.map(csvCell).join(';')).join('\r\n') + '\r\n';
+    r.row.sources.join(' | '), [...new Set((r.row.evidence || []).map(e => e.fetchedAt).filter(Boolean))].join(' | '), r.evidenceFile, r.checkedAt]; })].map(row => row.map(csvCell).join(';')).join('\r\n') + '\r\n';
 }
 const esc = x => String(x ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export function htmlReport(report, results, shortlist) {
   const link = (url, label = url) => /^https?:\/\//i.test(url) ? `<a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(label)}</a>` : esc(label);
   const cards = rows => rows.map(r => { const fields = contactFields(r.row, r.checks); const notes = resultNotes({ checks: [], ...r }); return `<article><h3>${esc(r.row.name)}</h3><p>${esc(STATUS[r.decision.code])}</p><p>${esc(r.decision.reason)}</p>
-    <p>${CHANNELS.filter(k => fields[k]).map(k => `${CHANNEL_LABELS[k]}: ${esc(fields[k])}`).join('<br>')}</p>
+    <p>Зона поиска: ${esc(r.row.searchCities.join(', '))}. Адрес источника: ${esc(r.row.address || 'не указан')}.</p>
+    <p>${CHANNELS.filter(k => fields[k]).map(k => `${CHANNEL_LABELS[k]}: ${esc(fields[k])}`).join('<br>') || 'Опубликованные контакты не найдены.'}</p>
+    <p>Контакты опубликованы в источниках; актуальность и согласие на обращение не подтверждены. ${r.reused ? 'Результат проверки сохранён ранее; дата: ' + esc(r.checkedAt) : ''}</p>
     <p><strong>Наблюдения:</strong> ${esc(notes.facts || 'Подтверждённого содержимого сайта нет.')}</p>
     <p><strong>Предположения:</strong> ${esc(notes.assumptions)}</p>
     ${notes.errors ? `<p><strong>Ошибки/ограничения:</strong> ${esc(notes.errors)}</p>` : ''}
@@ -109,11 +114,14 @@ export function htmlReport(report, results, shortlist) {
     </article>`; }).join('');
   return `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Проверка потенциальных клиентов</title>
     <style>body{font:16px/1.6 system-ui;max-width:1050px;margin:auto;padding:24px;color:#182329;background:#f3f5f5}article{background:white;padding:20px;margin:20px 0;border:1px solid #d4dcdc;border-radius:12px;overflow-wrap:anywhere}img{max-width:46%;max-height:380px;vertical-align:top;margin:1%}a{color:#075b91}p{overflow-wrap:anywhere}</style>
-    <h1>Кандидаты для ручного подтверждения</h1><p>Проверено ${report.checked} из ${report.totalInput}. В коротком списке ${shortlist.length}. Статус запуска: ${esc(report.status)}.</p>
+    <h1>Кандидаты для ручного подтверждения</h1><p>Обработано ${report.checked} из ${report.totalInput}. В коротком списке ${shortlist.length}. Статус запуска: ${esc(report.status)}.</p>
+    ${report.mode === 'saved-base' ? `<p>Все записи базы включены в отчёт. Подтверждённых сайтов: ${report.confirmedSites}; без подтверждённого сайта: ${report.withoutConfirmedSite}; ожидают проверки: ${report.pending}. Нового поиска организаций и запросов Overture не было.</p><p><a href="shortlist.csv">Короткий список CSV</a> · <a href="without-confirmed-site.csv">Без подтверждённого сайта CSV</a> · <a href="pending.csv">Ожидают проверки CSV</a> · <a href="audit.csv">Вся база CSV</a></p>` : ''}
     <p>Это помощь в отборе, не доказательство потребности в услуге. Ни одного сообщения не отправлено. Отсутствие найденного сайта не доказывает его отсутствие.</p>
+    ${report.errors?.length ? `<h2>Ошибки обработки</h2><ul>${report.errors.map(error => `<li>${esc(error)}</li>`).join('')}</ul>` : ''}
     <h2>Источники</h2><ul>${report.sources.map(s => `<li>${esc(s.city)} — ${esc(s.status)}: ${esc(s.message || `${s.count} объектов, выпуск ${s.release}`)} ${s.sourceUrl ? link(s.sourceUrl, 'Открыть источник') : ''}</li>`).join('')}</ul>
     <h2>Короткий список</h2>${cards(shortlist) || '<p>Обоснованных кандидатов в пределах этой проверки пока нет.</p>'}
-    <details><summary>Все проверенные организации</summary>${cards(results)}</details>
+    ${report.mode === 'saved-base' ? `<details><summary>Без подтверждённого сайта — нужна проверка (${report.withoutConfirmedSite})</summary>${cards(results.filter(r => r.decision.code !== 'confirmed'))}</details>` : ''}
+    <details><summary>Все организации</summary>${cards(results)}</details>
     <p>${esc(ATTRIBUTION)}</p><p>${esc(OVERTURE_ATTRIBUTION)}</p></html>`;
 }
 
@@ -138,7 +146,7 @@ export async function runAudit({ root, input, limit = 60, target = 20, log = con
       try { appendFileSync(join(output, 'diagnostics.log'), line, 'utf8'); logBytes += Buffer.byteLength(line); }
       catch { logFailed = true; consoleLog('Не удалось записать diagnostics.log; диагностика остаётся в окне.'); }
     };
-    log(`Проверка версии 0.2.3. Исходная выборка: ${path}\nЖурнал: ${join(output, 'diagnostics.log')}`);
+    log(`Проверка версии 0.2.4. Исходная выборка: ${path}\nЖурнал: ${join(output, 'diagnostics.log')}`);
     const report = { version: 2, sourceInput: path, startedAt: started, totalInput: rows.length, queued: queue.length,
       checked: 0, status: 'running', sources: [], errors: [], scope: 'Overture + OSM URLs + corporate email domains; not an exhaustive Internet search.' };
     await writeJson(join(output, 'report.json'), report);

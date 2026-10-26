@@ -47,7 +47,7 @@ export async function probe(url, { fetchImpl = fetch, signal, timeoutMs = 8000, 
   try {
     requestSignal.throwIfAborted();
     response = await fetchImpl(url, { redirect: 'manual', signal: requestSignal,
-      headers: { 'User-Agent': 'IgorClientFinder/0.2.3 (read-only source diagnostics)', ...(prefixOnly ? { Range: `bytes=0-${limit - 1}` } : {}) } });
+      headers: { 'User-Agent': 'IgorClientFinder/0.2.4 (read-only source diagnostics)', ...(prefixOnly ? { Range: `bytes=0-${limit - 1}` } : {}) } });
     const base = { url, http: response.status, elapsedMs: Math.round(performance.now() - started),
       contentLength: response.headers.get('content-length'), contentType: response.headers.get('content-type'),
       retryAfter: response.headers.get('retry-after') };
@@ -77,7 +77,7 @@ const publicResult = ({ body, ...rest }) => rest;
 export async function diagnoseSources({ fetchImpl = fetch, signal, timeoutMs = 8000, totalMs = 45000, log = console.log } = {}) {
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), totalMs);
   const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-  const report = { version: '0.2.3', startedAt: new Date().toISOString(), checks: [],
+  const report = { version: '0.2.4', startedAt: new Date().toISOString(), checks: [],
     scope: 'Small connectivity probes only; not a successful website search or proof of source coverage.' };
   const check = async (name, url, options = {}) => {
     log(`${name}: проверка до ${timeoutMs / 1000} с…`);

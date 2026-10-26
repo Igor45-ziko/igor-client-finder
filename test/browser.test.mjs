@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { stat } from 'node:fs/promises';
+import { stat, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { launchBrowser, createAuditor } from '../src/audit/browser.mjs';
 import { normalizeElement } from '../src/model.mjs';
 import { CITIES } from '../src/config.mjs';
 import { temporary, element, timestamp } from './helpers.mjs';
+import { runSavedBase } from '../src/audit/saved-base.mjs';
 
 // All pages and contacts below are synthetic. No external websites or messages.
 async function fixture(t, { deny = false, pageText = '', overflow = false, posting = false } = {}) {
@@ -29,7 +30,7 @@ async function fixture(t, { deny = false, pageText = '', overflow = false, posti
   const base = `http://127.0.0.1:${server.address().port}`;
   const auditor = createAuditor({ browser, guard: async raw => new URL(raw), fetchImpl: fetch, pause: async () => {} });
   const row = normalizeElement(element(1, { name: 'Сигма Мотор ТЕСТ' }), CITIES[0], timestamp);
-  return { received, base, auditor, row };
+  return { received, base, auditor, row, browser };
 }
 
 test('Playwright confirms identity, records mobile overflow, HTTP 404 evidence and screenshots without POST', async t => {
@@ -54,4 +55,39 @@ test('lookalike website with different contacts stays unverified even if it has 
   const root = await temporary(t); const f = await fixture(t, { pageText: 'Сигма Мотор ТЕСТ Телефон +7 000 000-00-99', overflow: true });
   const result = await f.auditor(f.row, { url: f.base, sources: [] }, { outputDir: root, slug: 'wrong' });
   assert.equal(result.status, 'unverified');
+});
+
+test('saved-base produces a portable shortlist with real Chromium evidence, then resumes without another website request', async t => {
+  const root = await temporary(t);
+  const f = await fixture(t, { pageText: 'Сигма Мотор ТЕСТ Телефон +7 000 000-00-01', overflow: true, posting: true });
+  f.row.rawWebsites = [f.base];
+  await mkdir(join(root, 'outputs', 'original'), { recursive: true });
+  await writeFile(join(root, 'outputs', 'original', 'organizations.json'), JSON.stringify([f.row]));
+  const options = { root, log: () => {}, browserFactory: async () => ({ close: async () => {} }), auditorFactory: () => f.auditor };
+  const first = await runSavedBase(options);
+  assert.equal(first.shortlist.length, 1); assert.equal(first.report.confirmedSites, 1);
+  assert.match(await readFile(join(first.output, 'shortlist.csv'), 'utf8'), /Переполнение на телефоне/);
+  const count = f.received.length;
+  const second = await runSavedBase({ ...options, browserFactory: () => assert.fail('Cached site must not launch browser') });
+  assert.equal(f.received.length, count); assert.equal(second.shortlist.length, 1);
+  assert.equal(second.results[0].reused, true);
+  for (const name of second.results[0].checks[0].screenshots) assert.ok((await stat(join(second.output, 'screenshots', name))).size > 100);
+  assert.equal(second.results[0].checks[0].screenshots.length, 2);
+  assert.equal(f.received.some(x => x.method === 'POST'), false);
+});
+
+test('site deadline closes a real browser context during a stalled navigation', async t => {
+  const root = await temporary(t); const server = createServer((req, res) => {
+    if (req.url === '/robots.txt') res.end('User-agent: *\nDisallow:\n');
+    // The synthetic homepage deliberately never responds.
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const browser = await launchBrowser(); t.after(() => browser.close());
+  const audit = createAuditor({ browser, guard: async raw => new URL(raw), pause: async () => {} });
+  const result = await audit(normalizeElement(element(), CITIES[0], timestamp),
+    { url: `http://127.0.0.1:${server.address().port}`, sources: [] }, { outputDir: root, slug: 'stall', timeoutMs: 1500 });
+  assert.equal(result.errorCode, 'SITE_TIMEOUT'); assert.equal(result.failureStage, 'homepage');
+  for (let i = 0; i < 30 && browser.contexts().length; i++) await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(browser.contexts().length, 0);
 });

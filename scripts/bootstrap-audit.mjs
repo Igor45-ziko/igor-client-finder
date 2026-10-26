@@ -25,6 +25,11 @@ try {
       console.log('Установка бесплатных библиотек Playwright и robots-parser по package-lock.json…');
       await run([npmCli, 'ci', '--no-audit', '--no-fund']);
     }
+    // The saved-base mode writes inventory before trying the browser. A browser
+    // failure must not prevent exporting existing contacts or trigger a download.
+    if (args.includes('--saved-base') && !setupOnly) {
+      const { main } = await import('../src/audit/cli.mjs'); await main(args);
+    } else {
     const { launchBrowser } = await import('../src/audit/browser.mjs');
     try { const browser = await launchBrowser(); await browser.close(); }
     catch {
@@ -34,5 +39,6 @@ try {
     }
     if (setupOnly) console.log('Браузер готов. Запуск: npm.cmd run audit -- --limit 5');
     else { const { main } = await import('../src/audit/cli.mjs'); await main(args); }
+    }
   }
 } catch (error) { console.error(`Ошибка: ${error.message}`); process.exitCode = 1; }

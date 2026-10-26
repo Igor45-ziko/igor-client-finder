@@ -1,5 +1,7 @@
 # Instructions for Codex
 
+- Version 0.2.4 priority: `audit-base.cmd` / `npm run audit:base` handles all saved snapshots without Overpass/Overture or new discovery. Preserve every record in exports, separate unconfirmed sites/errors from verified issues, and keep outputs/.cache/.tools. Results may be resumed for 24 hours with explicit dates; `--refresh-base` forces a fresh check. Never label the synthetic 269-row regression as the user's real database.
+
 - Work only in this project. Do not modify or push to `igor-sites-portfolio`, `hair-salon-site`, or their branches.
 - This is a Node.js 24.5+ (24 LTS) project. Stage 1 has no package dependencies; stage 2 uses pinned free Playwright and robots-parser packages and the official checksum-pinned Overture CLI. Do not add paid services, API keys or a model API.
 - Windows user command: `npm.cmd start`; small live trial: `npm.cmd start -- --cities Тверь --target 5`. Read README before running.

@@ -41,6 +41,11 @@ export function availableContacts(row, checks = []) {
     const match = linkContact(item.raw);
     add(match?.channel || 'other', match?.value || item.raw, row.sources?.[0], 'Опубликован в OSM; актуальность не подтверждена');
   }
+  // Some old OSM exports store a social profile in the website field.
+  for (const raw of row.rawWebsites || []) {
+    const match = linkContact(/^https?:/i.test(raw) ? raw : `https://${raw}`);
+    if (match) add(match.channel, match.value, row.sources?.[0], 'Опубликован в поле сайта OSM; актуальность не подтверждена');
+  }
   // v0.1 saved all original tags. Recover MAX and explicit handles without re-querying OSM.
   for (const entry of row.evidence || []) for (const channel of ['vk', 'telegram', 'max', 'whatsapp']) {
     for (const field of [`contact:${channel}`, channel]) {

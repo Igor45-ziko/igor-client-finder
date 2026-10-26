@@ -51,14 +51,16 @@ export async function launchBrowser({ env = process.env } = {}) {
 
 export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, pause = sleep, clock = Date.now } = {}) {
   const policies = new Map(); const lastVisit = new Map(); const limited = new Set();
-  async function policy(raw) {
-    const url = await guard(raw); const origin = url.origin;
+  async function policy(raw, signal) {
+    signal?.throwIfAborted();
+    const url = await guard(raw); signal?.throwIfAborted(); const origin = url.origin;
     if (policies.has(origin)) return policies.get(origin);
     const robotsUrl = origin + '/robots.txt';
     let r; let current = robotsUrl;
     for (let redirect = 0; redirect < 4; redirect++) {
       await guard(current);
-      r = await fetchImpl(current, { redirect: 'manual', signal: AbortSignal.timeout(12000), headers: { 'User-Agent': 'IgorClientFinder/0.2' } });
+      signal?.throwIfAborted();
+      r = await fetchImpl(current, { redirect: 'manual', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(12000)]) : AbortSignal.timeout(12000), headers: { 'User-Agent': 'IgorClientFinder/0.2' } });
       if (![301, 302, 303, 307, 308].includes(r.status) || !r.headers.get('location')) break;
       current = new URL(r.headers.get('location'), current).href; await r.body?.cancel();
     }
@@ -76,17 +78,32 @@ export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, p
     }
     policies.set(origin, value); return value;
   }
-  return async function audit(row, candidate, { outputDir, slug, signal } = {}) {
+  return async function audit(row, candidate, { outputDir, slug, signal: externalSignal, timeoutMs = 45000 } = {}) {
     const result = { candidate, status: 'unverified', checkedAt: new Date(clock()).toISOString(), pages: [], issues: [], screenshots: [], matched: [], blockedRequests: 0 };
     let context; let routeReason = ''; let stage = 'address';
+    const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const signal = externalSignal ? AbortSignal.any([externalSignal, controller.signal]) : controller.signal;
+    const close = async () => { if (context) await context.close().catch(() => {}); };
+    let onAbort;
+    const cancelled = new Promise(resolve => {
+      onAbort = () => { void close(); resolve({ ...structuredClone(result), status: 'unavailable',
+        reason: `Проверка остановлена (${externalSignal?.aborted ? 'отмена или общий бюджет' : 'лимит времени сайта'}; этап: ${stage}). Это не доказательство неисправности сайта.`,
+        failureStage: stage, errorCode: externalSignal?.aborted ? 'CANCELLED' : 'SITE_TIMEOUT' }); };
+      signal.addEventListener('abort', onAbort, { once: true }); if (signal.aborted) onAbort();
+    });
+    async function perform() {
     try {
+      signal.throwIfAborted();
       const initial = await guard(candidate.url);
+      signal.throwIfAborted();
       stage = 'robots';
-      const rule = await policy(initial.href);
+      const rule = await policy(initial.href, signal);
+      signal.throwIfAborted();
       if (!rule.allowed || rule.robots.isAllowed(initial.href, 'IgorClientFinder') === false)
         return { ...result, status: 'access_limited', reason: rule.reason || 'robots.txt запрещает проверку.' };
       context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block', acceptDownloads: false,
         userAgent: 'Mozilla/5.0 (compatible; IgorClientFinder/0.2; read-only website audit)', ignoreHTTPSErrors: false });
+      if (signal.aborted) { await close(); signal.throwIfAborted(); }
       await context.routeWebSocket('**/*', ws => ws.close());
       const vetted = new Set(); let requests = 0;
       await context.route('**/*', async route => {
@@ -96,15 +113,16 @@ export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, p
             throw new Error('READ_ONLY_LIMIT');
           const url = new URL(request.url());
           if (!vetted.has(url.origin)) { await guard(url.href); vetted.add(url.origin); }
+          signal.throwIfAborted();
           if (request.isNavigationRequest()) {
             if (limited.has(url.origin)) throw new Error('SERVER_LIMIT');
-            const p = await policy(url.href);
+            const p = await policy(url.href, signal);
             if (!p.allowed || p.robots.isAllowed(url.href, 'IgorClientFinder') === false) throw new Error('ROBOTS_DENIED');
             const wait = Math.max(0, p.delay - (clock() - (lastVisit.get(url.origin) || 0)));
-            if (wait) await pause(wait);
+            if (wait) await pause(wait, undefined, { signal });
             lastVisit.set(url.origin, clock());
           }
-          await route.continue();
+          signal.throwIfAborted(); await route.continue();
         } catch (error) {
           result.blockedRequests++;
           if (request.isNavigationRequest()) routeReason = error.message;
@@ -171,6 +189,9 @@ export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, p
         (/timeout|timed out/i.test(error.message) ? 'TIMEOUT' : 'BROWSER_OR_NETWORK');
       return { ...result, status: /ACCESS_LIMITED|ROBOTS|SERVER_LIMIT/.test(error.message + routeReason) ? 'access_limited' : 'unavailable',
         reason: `Проверка ограничена или страница не загрузилась (этап: ${stage}, код: ${errorCode}). Это не доказывает, что сайт неисправен у клиентов.`, errorCode, failureStage: stage };
-    } finally { await context?.close(); }
+    } finally { await close(); }
+    }
+    try { return await Promise.race([perform(), cancelled]); }
+    finally { clearTimeout(timer); signal.removeEventListener('abort', onAbort); }
   };
 }
