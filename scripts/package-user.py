@@ -29,7 +29,9 @@ def payload():
         path = ROOT / name
         if path.is_symlink() or not path.is_file():
             raise ValueError(f'Expected regular source file: {name}')
-        result[name] = path.read_bytes()
+        # Git for Windows may check text out as CRLF. The distribution uses LF
+        # consistently; never alter any other content during comparison/build.
+        result[name] = path.read_bytes().replace(b'\r\n', b'\n')
     package = json.loads(result['package.json'])
     for key in ['test', 'check']:
         package['scripts'].pop(key, None)
