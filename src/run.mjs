@@ -1,7 +1,9 @@
 import { mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ATTRIBUTION, CITIES, ENDPOINT, queryFor } from './config.mjs';
+import { ATTRIBUTION, MOSCOW_AREAS, ENDPOINT, queryFor } from './config.mjs';
+import { compactReport } from './audit/prospects.mjs';
+import { discover } from './audit/matching.mjs';
 import { makeClient, SearchError, writeJson } from './network.mjs';
 import { normalizeElement, deduplicate, selectLeads, toCsv, classify } from './model.mjs';
 
@@ -46,13 +48,13 @@ function summaryText(report) {
     'report.json — статус, запросы и счётчики; organizations.json — поля и источники для каждой записи.',
     '',
     'Отсутствие ссылки в OSM НЕ доказывает отсутствие сайта. Работа сайтов и принадлежность контактов не проверялись.',
-    'Поиск охватывает круг вокруг каждого города и может включать окрестности. Город из адреса OSM хранится отдельно.',
+    'Москва и область запрашиваются по административным границам OSM; прежние зоны — кругами. Населённый пункт из адреса OSM хранится отдельно.',
     'Телефоны и email только прочитаны из открытых данных. Сообщения, заявки и звонки не отправлялись.',
     ATTRIBUTION,
   ].join('\n') + '\n';
 }
 
-export async function run({ root, cities = CITIES, target = 20, refresh = false,
+export async function run({ root, cities = MOSCOW_AREAS, target = 20, refresh = false,
   fetchImpl, clock = Date.now, sleep, log = console.log, signal, interval } = {}) {
   const cacheDir = join(root, '.cache');
   await mkdir(cacheDir, { recursive: true });
@@ -60,7 +62,7 @@ export async function run({ root, cities = CITIES, target = 20, refresh = false,
   try {
     const startedAt = new Date(clock()).toISOString();
     const report = { version: 1, status: 'running', startedAt, target, endpoint: ENDPOINT,
-      attribution: ATTRIBUTION, dataLimitations: 'OSM only; no website audit or verification of business/contact ownership; circular search includes surroundings.',
+      attribution: ATTRIBUTION, dataLimitations: 'OSM only; no independent website discovery or verification of business/contact ownership. Moscow uses administrative areas; legacy cities use circles.',
       cities: [], rawCount: 0, organizations: 0, duplicatesMerged: 0, leads: 0 };
     const rows = [];
     const client = makeClient({ endpoint: ENDPOINT, cacheDir, fetchImpl, clock, sleep, log, signal, interval });
@@ -68,17 +70,23 @@ export async function run({ root, cities = CITIES, target = 20, refresh = false,
     for (const city of cities) {
       if (stop) { report.cities.push({ name: city.name, status: 'not_requested', message: 'Не запрашивался после остановки поиска.' }); continue; }
       const query = queryFor(city);
-      log(`Поиск: ${city.name}, радиус ${city.radius / 1000} км…`);
+      log(`Поиск: ${city.name}, ${city.areaWikidata ? 'административная граница целиком' : `радиус ${city.radius / 1000} км`}…`);
       try {
         const result = await client.search(query, { refresh });
-        const found = result.data.elements.map(x => normalizeElement(x, city, result.fetchedAt)).filter(Boolean);
+        if (city.areaWikidata) {
+          const counters = result.data.elements.filter(x => x.type === 'count');
+          if (counters.length !== 1 || counters[0].tags.areas !== '1' || counters[0].tags.total !== '1')
+            throw new SearchError('AREA_NOT_RESOLVED', 'Единственная административная граница не подтверждена. Это не успешный поиск с нулевым результатом.', { stop: true });
+        }
+        const elements = result.data.elements.filter(x => x.type !== 'count');
+        const found = elements.map(x => normalizeElement(x, city, result.fetchedAt)).filter(Boolean);
         rows.push(...found);
-        report.rawCount += result.data.elements.length;
-        report.cities.push({ name: city.name, status: 'ok', query, radiusMeters: city.radius,
-          rawCount: result.data.elements.length, acceptedBeforeDeduplication: found.length,
+        report.rawCount += elements.length;
+        report.cities.push({ name: city.name, status: 'ok', query, radiusMeters: city.radius, areaWikidata: city.areaWikidata,
+          rawCount: elements.length, acceptedBeforeDeduplication: found.length,
           fromCache: result.fromCache, fetchedAt: new Date(result.fetchedAt).toISOString(),
           osmBaseTimestamp: result.data.osm3s?.timestamp_osm_base ?? null });
-        log(`${city.name}: получено ${result.data.elements.length}, сохранено ${found.length}${result.fromCache ? ' (кэш)' : ''}.`);
+        log(`${city.name}: получено ${elements.length}, сохранено ${found.length}${result.fromCache ? ' (кэш)' : ''}.`);
       } catch (error) {
         // Unexpected programming/filesystem errors must fail loudly rather than masquerade as a partial search.
         if (!(error instanceof SearchError)) throw error;
@@ -108,6 +116,8 @@ export async function run({ root, cities = CITIES, target = 20, refresh = false,
     await writeJson(join(output, 'organizations.json'), organizations);
     await writeJson(join(output, 'report.json'), report);
     await writeFile(join(output, 'README.txt'), summaryText(report), 'utf8');
+    await writeFile(join(output, 'report.html'), compactReport(report, organizations.map(row => ({ row, checks: [],
+      discovery: discover(row, { status: 'not_requested' }), decision: { code: 'not_confirmed' } })), { detailsUrl: null }));
     log(`\nСохранено: ${output}\nКандидатов: ${leads.length}/${target}. Статус: ${report.status}.`);
     if (report.status !== 'complete') log('Поиск неполный. Откройте README.txt и report.json; нули при ошибке не означают отсутствие компаний.');
     return { report, output, exitCode: report.status === 'complete' ? 0 : 2 };

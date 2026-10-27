@@ -16,7 +16,7 @@ test('search is driven by geography/category, not a provided company list', () =
 test('CLI has bounded targets and rejects unknown cities/options', () => {
   assert.equal(parseArgs([]).target, 20);
   assert.equal(parseArgs(['--cities', 'Тула,Тула,Рязань', '--target', '5']).cities.length, 2);
-  for (const args of [['--target', '0'], ['--target', '21'], ['--target', 'NaN'], ['--target', '2.5'], ['--cities', 'Москва'], ['--send']])
+  for (const args of [['--target', '0'], ['--target', '21'], ['--target', 'NaN'], ['--target', '2.5'], ['--cities', 'Неизвестный город'], ['--send']])
     assert.throws(() => parseArgs(args));
 });
 test('missing website is never described as a verified absence', () => {

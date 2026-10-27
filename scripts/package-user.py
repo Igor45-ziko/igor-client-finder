@@ -14,12 +14,12 @@ ARCHIVE = ROOT / 'downloads/igor-client-finder.zip'
 PREFIX = 'igor-client-finder/'
 FILES = [
     'README.md', 'SOURCES.md', 'package.json', 'package-lock.json',
-    'start.cmd', 'start-audit.cmd', 'audit-base.cmd', 'test-audit.cmd', 'diagnose-sources.cmd',
+    'start.cmd', 'start-audit.cmd', 'audit-base.cmd', 'test-audit.cmd', 'diagnose-sources.cmd', 'report-base.cmd',
     'scripts/bootstrap-audit.mjs', 'scripts/diagnose-sources.mjs',
     'src/cli.mjs', 'src/config.mjs', 'src/model.mjs', 'src/network.mjs', 'src/run.mjs',
     'src/audit/browser.mjs', 'src/audit/cli.mjs', 'src/audit/contacts.mjs',
     'src/audit/diagnostics.mjs', 'src/audit/matching.mjs', 'src/audit/overture.mjs',
-    'src/audit/process.mjs', 'src/audit/run.mjs', 'src/audit/saved-base.mjs',
+    'src/audit/process.mjs', 'src/audit/run.mjs', 'src/audit/saved-base.mjs', 'src/audit/prospects.mjs', 'src/audit/report-only.mjs',
 ]
 
 
@@ -44,7 +44,7 @@ def payload():
             text = text.split('## Проверки для Codex')[0] + '''## Полные исходники и тесты
 
 Разработческие проверки npm run check / npm test доступны в полном репозитории,
-а не в этом пользовательском ZIP. Версия программы остаётся 0.2.4.
+а не в этом пользовательском ZIP. Версия программы указана в package.json.
 https://github.com/Igor45-ziko/igor-client-finder
 
 Файл ARCHIVE-CONTENTS.sha256 перечисляет содержимое и контрольные суммы.

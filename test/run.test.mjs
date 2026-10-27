@@ -9,7 +9,7 @@ import { run } from '../src/run.mjs';
 import { CITIES } from '../src/config.mjs';
 import { temporary, timestamp, element, payload, response } from './helpers.mjs';
 
-const common = { clock: () => timestamp, interval: 0, sleep: async () => {}, log: () => {} };
+const common = { cities: CITIES, clock: () => timestamp, interval: 0, sleep: async () => {}, log: () => {} };
 test('end-to-end synthetic search exports CSV, provenance, deduped shortlist and reserves', async t => {
   const root = await temporary(t);
   const records = [element(), element(2), element(3, { name: 'Тест с сайтом', website: 'example.org' }), element(4, { name: 'Без контактов', phone: '' })];

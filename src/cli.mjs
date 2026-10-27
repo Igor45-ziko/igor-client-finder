@@ -3,19 +3,21 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from './config.mjs';
 import { run } from './run.mjs';
 
-const help = `Игорь — поиск организаций, версия проекта 0.2
+const help = `Игорь — поиск организаций, версия проекта 0.2.5
 
 Запуск в Windows 11: npm.cmd start
 Нужен Node.js 24.5+ (ветка 24 LTS). Установка npm-пакетов и API-ключи не нужны.
 
 Параметры:
-  --cities "Тверь,Тула,Рязань"   Зоны поиска (по умолчанию все три)
+  --cities "Москва,Московская область"  По умолчанию обе административные территории целиком
+  --cities "Тверь,Тула,Рязань"   Прежние зоны доступны явно
   --target 20                   До 20 предварительных кандидатов
   --refresh                     Обновить кэш (не отменяет паузы и блокировки)
   --help                        Показать справку
 
-Небольшое испытание: npm.cmd start -- --cities Тверь --target 5
-Результаты: outputs/<дата-запуска>/leads.csv и report.json.
+Пример одной территории: npm.cmd start -- --cities Москва --target 5
+Параметр target ограничивает итоговый список, а не объём запроса территории.
+Результаты: outputs/<дата-запуска>/report.html, organizations.json и таблицы.
 Источник: OpenStreetMap через Overpass API; © OpenStreetMap contributors, ODbL.
 Нет автоматических сообщений. Отсутствие сайта в OSM не доказывает отсутствие сайта.
 `;

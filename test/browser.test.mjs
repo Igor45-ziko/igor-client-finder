@@ -11,16 +11,19 @@ import { temporary, element, timestamp } from './helpers.mjs';
 import { runSavedBase } from '../src/audit/saved-base.mjs';
 
 // All pages and contacts below are synthetic. No external websites or messages.
-async function fixture(t, { deny = false, pageText = '', overflow = false, posting = false } = {}) {
+async function fixture(t, { deny = false, pageText = '', overflow = false, posting = false, internal = false } = {}) {
   const received = [];
   const server = createServer((req, res) => {
     received.push({ method: req.method, url: req.url });
     if (req.url === '/robots.txt') { res.end(`User-agent: *\nDisallow: ${deny ? '/' : ''}\n`); return; }
     if (req.url === '/broken.png' || req.url === '/contacts') { res.statusCode = 404; res.end('Not found'); return; }
+    if (internal && req.url === '/services') { res.statusCode = 404; res.end('Synthetic missing content page'); return; }
+    if (internal && req.url === '/about') { res.statusCode = 403; res.end('Synthetic access restriction'); return; }
     if (req.url === '/submit') { res.end('UNEXPECTED FORM SUBMISSION'); return; }
     res.setHeader('content-type', 'text/html; charset=utf-8');
     res.end(`<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Test only</title>
       <body>${pageText}<a href="/contacts">Контакты</a><img src="/broken.png" width="50" height="50">${overflow ? '<div style="width:1200px;height:50px;background:red">TEST OVERFLOW</div>' : ''}
+      ${internal ? '<a href="/services">Услуги</a><a href="/about">О нас</a>' : ''}
       ${posting ? '<script>fetch("/submit",{method:"POST",body:"test"}).catch(()=>{});</script>' : ''}</body></html>`);
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -55,6 +58,16 @@ test('lookalike website with different contacts stays unverified even if it has 
   const root = await temporary(t); const f = await fixture(t, { pageText: 'Сигма Мотор ТЕСТ Телефон +7 000 000-00-99', overflow: true });
   const result = await f.auditor(f.row, { url: f.base, sources: [] }, { outputDir: root, slug: 'wrong' });
   assert.equal(result.status, 'unverified');
+});
+
+test('bounded internal link audit records actual HTTP 404 but never calls a 403 a broken link', async t => {
+  const root = await temporary(t); const f = await fixture(t, { pageText: 'Сигма Мотор ТЕСТ Телефон +7 000 000-00-01', internal: true });
+  const result = await f.auditor(f.row, { url: f.base, sources: [] }, { outputDir: root, slug: 'links' });
+  assert.equal(result.status, 'confirmed');
+  assert.equal(result.issues.filter(i => i.code === 'link_404').length, 1);
+  assert.equal(result.issues.find(i => i.code === 'link_404').url, f.base + '/services');
+  assert.equal(result.linkChecks.length, 2); assert.equal(result.linkChecks[1].status, 'unavailable');
+  assert.ok(!result.issues.some(i => i.url === f.base + '/about'));
 });
 
 test('saved-base produces a portable shortlist with real Chromium evidence, then resumes without another website request', async t => {

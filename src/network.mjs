@@ -32,8 +32,9 @@ export function validatePayload(data) {
     throw new SearchError('OVERPASS_INCOMPLETE', 'Overpass сообщил об ошибке выполнения. Неполные данные не используются.');
   if (data.elements.length > 10000)
     throw new SearchError('TOO_MANY_ELEMENTS', 'Слишком большая выборка; остановка без обрезания данных.');
-  if (data.elements.some(x => !x || !['node', 'way', 'relation'].includes(x.type) ||
-      !Number.isSafeInteger(x.id) || x.id <= 0 || !x.tags || typeof x.tags !== 'object' || Array.isArray(x.tags)))
+  const count = x => x?.type === 'count' && x.id === 0 && x.tags && ['nodes', 'ways', 'relations', 'areas', 'total'].every(k => /^\d+$/.test(x.tags[k] || ''));
+  if (data.elements.some(x => !count(x) && (!x || !['node', 'way', 'relation'].includes(x.type) ||
+      !Number.isSafeInteger(x.id) || x.id <= 0 || !x.tags || typeof x.tags !== 'object' || Array.isArray(x.tags))))
     throw new SearchError('INVALID_RESPONSE', 'Некорректный объект в ответе Overpass.');
   return data;
 }

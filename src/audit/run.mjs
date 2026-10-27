@@ -84,7 +84,7 @@ export function resultNotes(r) {
       'Возможно, полезно исправление выявленных проблем; интерес и бюджет не установлены.') : 'Автоматически обоснованного предложения услуги пока нет.',
     errors: [r.row.geoWarning, r.decision.code !== 'confirmed' && r.discovery.independentStatus !== 'ok' &&
       (r.discovery.independentStatus === 'not_requested' ? 'Независимый поиск не выполнялся в режиме сохранённой базы.' : 'Независимый поиск недоступен, отключён или неполон'),
-      ...r.checks.map(c => c.reason || c.contactCheck), r.untestedCandidates > 0 && `Не проверено адресов: ${r.untestedCandidates}`].filter(Boolean).join(' | '),
+      ...r.checks.flatMap(c => [c.reason, c.contactCheck, c.linkCheck]), r.untestedCandidates > 0 && `Не проверено адресов: ${r.untestedCandidates}`].filter(Boolean).join(' | '),
   };
 }
 export function auditCsv(results) {
@@ -146,7 +146,7 @@ export async function runAudit({ root, input, limit = 60, target = 20, log = con
       try { appendFileSync(join(output, 'diagnostics.log'), line, 'utf8'); logBytes += Buffer.byteLength(line); }
       catch { logFailed = true; consoleLog('Не удалось записать diagnostics.log; диагностика остаётся в окне.'); }
     };
-    log(`Проверка версии 0.2.4. Исходная выборка: ${path}\nЖурнал: ${join(output, 'diagnostics.log')}`);
+    log(`Проверка версии 0.2.5. Исходная выборка: ${path}\nЖурнал: ${join(output, 'diagnostics.log')}`);
     const report = { version: 2, sourceInput: path, startedAt: started, totalInput: rows.length, queued: queue.length,
       checked: 0, status: 'running', sources: [], errors: [], scope: 'Overture + OSM URLs + corporate email domains; not an exhaustive Internet search.' };
     await writeJson(join(output, 'report.json'), report);

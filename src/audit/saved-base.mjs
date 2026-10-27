@@ -9,6 +9,7 @@ import { validateRows, decide, resultNotes, auditCsv, htmlReport, STATUS } from 
 import { discover } from './matching.mjs';
 import { availableContacts } from './contacts.mjs';
 import { launchBrowser, createAuditor } from './browser.mjs';
+import { compactReport } from './prospects.mjs';
 
 const fingerprint = row => createHash('sha256').update(JSON.stringify(row)).digest('hex');
 const unavailableSource = { status: 'not_requested', data: { features: [] } };
@@ -92,7 +93,7 @@ export async function runSavedBase({ root, input, target = 20, refreshBase = fal
     await mkdir(join(output, 'evidence'), { recursive: true });
     const print = log;
     log = message => { print(message); appendFileSync(join(output, 'diagnostics.log'), `${new Date().toISOString()} ${message}\n`); };
-    const report = { version: '0.2.4', mode: 'saved-base', startedAt: started, status: 'running', totalInput: base.rows.length,
+    const report = { version: '0.2.5', mode: 'saved-base', startedAt: started, status: 'running', totalInput: base.rows.length,
       inputs: base.inputs, readRecords: base.readRecords, duplicates: base.duplicates, errors: [...base.warnings],
       sources: [{ city: 'Вся сохранённая база', status: 'not_requested', message: 'Только сохранённые данные. Overpass, Overture, Wikidata и AllThePlaces не запрашиваются.' }],
       scope: 'Saved website/email candidates only. No independent website discovery. No messages sent.', budgetMs, siteTimeoutMs };
@@ -138,9 +139,10 @@ export async function runSavedBase({ root, input, target = 20, refreshBase = fal
       for (const [file, rows] of [['audit.csv', results], ['shortlist.csv', shortlist],
         ['without-confirmed-site.csv', results.filter(r => r.decision.code !== 'confirmed')],
         ['pending.csv', results.filter(r => r.decision.code === 'pending')]]) await writeFile(join(output, file), auditCsv(rows), 'utf8');
-      await writeFile(join(output, 'report.html'), htmlReport(report, results, shortlist), 'utf8');
+      await writeFile(join(output, 'details.html'), htmlReport(report, results, shortlist), 'utf8');
+      await writeFile(join(output, 'report.html'), compactReport(report, results), 'utf8');
     };
-    log(`Версия 0.2.4: ${results.length} организаций, удалено повторов: ${base.duplicates}. Новый поиск и Overture отключены.`);
+    log(`Версия 0.2.5: ${results.length} организаций, удалено повторов: ${base.duplicates}. Новый поиск и Overture отключены.`);
     await checkpoint();
     log(`Контакты: ${report.withContacts}; адреса сайтов для проверки: ${report.withWebsiteCandidates}. Отчёт уже сохранён: ${output}`);
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), budgetMs);

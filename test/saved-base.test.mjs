@@ -74,7 +74,9 @@ test('shortlist contains only confirmed problems with contacts; errors and looka
   assert.equal(result.shortlist[0].row.sourceIds[0], 'node/1');
   assert.equal(result.report.status, 'partial'); assert.equal(result.report.withoutConfirmedSite, 2);
   const html = await readFile(join(result.output, 'report.html'), 'utf8');
-  assert.match(html, /without-confirmed-site.csv/); assert.match(html, /актуальность и согласие/);
+  assert.match(html, /Организация → источник → результат/); assert.match(html, /details.html/);
+  const details = await readFile(join(result.output, 'details.html'), 'utf8');
+  assert.match(details, /without-confirmed-site.csv/); assert.match(details, /актуальность и согласие/);
 });
 
 test('email domains and social-only websites remain distinct and keep available contacts', async t => {

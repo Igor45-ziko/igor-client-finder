@@ -25,6 +25,8 @@ for(const dir of ['outputs','.cache','.tools']) {await mkdir(dir,{recursive:true
     if ($LASTEXITCODE -ne 0) { throw 'Synthetic local setup failed' }
     & cmd /d /c 'audit-base.cmd < NUL'
     if ($LASTEXITCODE -ne 0) { throw 'Actual extracted audit-base.cmd failed' }
+    & cmd /d /c 'report-base.cmd < NUL'
+    if ($LASTEXITCODE -ne 0) { throw 'Offline compact report command failed' }
     $reports = @(Get-ChildItem outputs -Directory -Filter 'base-audit-*')
     if ($reports.Count -ne 1) { throw 'Expected exactly one offline report' }
     $report = Get-Content (Join-Path $reports[0].FullName 'report.json') -Raw | ConvertFrom-Json

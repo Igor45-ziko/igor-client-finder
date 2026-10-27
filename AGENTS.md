@@ -1,5 +1,7 @@
 # Instructions for Codex
 
+- Version 0.2.5: default NEW searches target Moscow and Moscow Oblast administrative areas; keep legacy regions and outputs. report-base.cmd reformats existing audits offline. Compact reports show no main-list contact directory, never invent card URLs, and label OSM vs unverified directory references explicitly. Independent directory/website discovery has NOT been validated. No new Overture work.
+
 - Version 0.2.4 priority: `audit-base.cmd` / `npm run audit:base` handles all saved snapshots without Overpass/Overture or new discovery. Preserve every record in exports, separate unconfirmed sites/errors from verified issues, and keep outputs/.cache/.tools. Results may be resumed for 24 hours with explicit dates; `--refresh-base` forces a fresh check. Never label the synthetic 269-row regression as the user's real database.
 
 - Work only in this project. Do not modify or push to `igor-sites-portfolio`, `hair-salon-site`, or their branches.

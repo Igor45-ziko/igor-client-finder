@@ -56,10 +56,11 @@ export function normalizeElement(element, city, fetchedAt) {
     websites: unique(rawWebsites.map(websiteUrl)),
     sourceIds: [`${element.type}/${element.id}`], sources: [source],
     evidence: [{ source, fetchedAt: new Date(fetchedAt).toISOString(), tags }],
-    geoWarning: cityInSource && normalizeName(cityInSource.replace(/^г\.?\s*/i, '')) !== normalizeName(city.name)
+    searchScope: city.areaWikidata ? { type: 'administrative_area', wikidata: city.areaWikidata } : { type: 'radius', radius: city.radius },
+    geoWarning: !city.areaWikidata && cityInSource && normalizeName(cityInSource.replace(/^г\.?\s*/i, '')) !== normalizeName(city.name)
       ? 'В адресе OSM указан другой населённый пункт; требуется проверка.' : '',
   };
-  if (Number.isFinite(lat) && Number.isFinite(lon) && distance(row, city) > city.radius + 500)
+  if (!city.areaWikidata && Number.isFinite(lat) && Number.isFinite(lon) && distance(row, city) > city.radius + 500)
     row.geoWarning = 'Центр объекта за пределами зоны поиска; требуется проверка.';
   return row;
 }

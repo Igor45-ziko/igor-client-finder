@@ -7,6 +7,7 @@ import robotsParser from 'robots-parser';
 import { chromium } from 'playwright';
 import { siteEvidence, isDirectory } from './matching.mjs';
 import { linkContact } from './contacts.mjs';
+import { directoryReference, internalTargets } from './prospects.mjs';
 
 export function publicIp(ip) {
   ip = ip.toLowerCase().replace(/^\[|\]$/g, '');
@@ -142,7 +143,8 @@ export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, p
         const links = await page.locator('a[href]').evaluateAll(links => links.slice(0, 1000).map(a => a.href));
         const contacts = links.map(linkContact).filter(Boolean);
         text += '\n' + contacts.filter(c => ['phone', 'email'].includes(c.channel)).map(c => c.value).join('\n');
-        const record = { url: page.url(), http: status, title: await page.title(), textExcerpt: text.slice(0, 2000), contacts, signals: siteEvidence(row, text) };
+        const record = { url: page.url(), http: status, title: await page.title(), textExcerpt: text.slice(0, 2000), contacts,
+          directoryReferences: links.map(directoryReference).filter(r => r?.kind === 'directory').slice(0, 20), signals: siteEvidence(row, text) };
         result.pages.push(record);
         if ([401, 403, 429].includes(status) || (text.length < 3000 && /подтвердите.{0,30}(человек|робот)|checking your browser|access denied|verify you are human/i.test(text)))
           throw new Error('ACCESS_LIMITED');
@@ -150,6 +152,7 @@ export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, p
       }
       stage = 'homepage';
       const home = await visit(initial.href); const homeUrl = page.url();
+      const homeLinks = await page.locator('a[href]').evaluateAll(links => links.slice(0, 1000).map(a => a.href));
       if (isDirectory(homeUrl)) return { ...result, finalUrl: homeUrl, status: 'unverified', reason: 'Адрес перенаправляет в соцсеть или каталог; самостоятельный сайт не подтверждён.' };
       const contact = await page.locator('a[href]').evaluateAll(links => links.map(a => ({ url: a.href, text: a.textContent || '' }))
         .find(a => /контакт|contacts?/i.test(a.text) && /^https?:/.test(a.url) && new URL(a.url).origin === location.origin && new URL(a.url).pathname !== location.pathname));
@@ -183,6 +186,19 @@ export function createAuditor({ browser, guard = publicUrl, fetchImpl = fetch, p
       for (const url of [...brokenImages].filter(url => renderedImages.has(url)).slice(0, 5)) result.issues.push({ code: 'image_404', label: 'Изображение на странице вернуло HTTP 404', url, weight: 2 });
       await page.screenshot({ path: join(outputDir, `${slug}-mobile.png`), fullPage: false, timeout: 10000 });
       result.screenshots.push(`${slug}-mobile.png`);
+      // Two content pages at most, within the SAME overall deadline and robots policy.
+      // Access failures are observations about this check, never a website defect.
+      stage = 'internal-links'; result.linkChecks = [];
+      if (evidence.confirmed) for (const url of internalTargets(homeUrl, homeLinks, contact ? [contact.url] : [])) {
+        try {
+          const linked = await visit(url);
+          result.linkChecks.push({ url, finalUrl: page.url(), http: linked.status, sourceUrl: homeUrl });
+          if (linked.status === 404) result.issues.push({ code: 'link_404', label: 'Внутренняя ссылка вернула HTTP 404', url: page.url(), sourceUrl: homeUrl, weight: 4 });
+        } catch {
+          result.linkChecks.push({ url, status: 'unavailable', sourceUrl: homeUrl });
+          result.linkCheck = 'Не все внутренние ссылки удалось проверить; ошибка доступа не считается неисправностью сайта.';
+        }
+      }
       return result;
     } catch (error) {
       const errorCode = (error.message + ' ' + routeReason).match(/UNSAFE_URL|UNSAFE_HOST|NON_PUBLIC_ADDRESS|ENOTFOUND|EAI_AGAIN|ERR_[A-Z_]+|ACCESS_LIMITED|ROBOTS_DENIED|SERVER_LIMIT/)?.[0] ||
