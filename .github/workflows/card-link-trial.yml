@@ -1,0 +1,26 @@
+name: Experimental card link trial - Windows checks
+on:
+  push:
+    branches: [diagnostic/card-link-trial]
+permissions:
+  contents: read
+jobs:
+  windows-checks:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium --only-shell
+      - run: npm run check
+      - run: node --check probe-card-links.mjs
+      - run: npm test
+      - name: Native Windows launcher - help only, no source or company requests
+        shell: pwsh
+        run: |
+          cmd /d /c "probe-card-links.cmd --help < NUL"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
